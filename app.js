@@ -61,46 +61,58 @@
 
   function clear() { app.textContent = ''; }
 
+  // 비워 두면 다시 적히는 기본 이름
+  var DEF = { team: '팀이름', proj: '프로젝트명', node: '시작노드' };
+
   /*
-   * 제자리 수정 위젯: 텍스트 + [수정] 버튼. 누르면 입력칸으로 바뀌고 저장/취소한다.
-   * opts: tag, cls, label(접근성 이름), max, get(), set(v), formCls
+   * 글자를 눌러(또는 Tab 후 Enter) 바로 수정하는 위젯. 수정 버튼은 없다.
+   * Enter·바깥 클릭 = 저장, Esc = 취소. 비우면 기본 이름(def)이 다시 적힌다.
    * 저장 실패 시 이전 값으로 되돌린다.
+   * opts: tag(제목 태그), cls, label(접근성 이름), max, def, project, get(), set(v)
    */
   function editable(opts) {
-    var wrap = el('div', { class: opts.wrapCls || 'project-line' });
+    var wrap = el(opts.tag, { class: opts.cls || '' });
 
     function view() {
       wrap.textContent = '';
-      var text = el(opts.tag, { class: opts.cls || '', text: opts.get() });
-      var btn = el('button', { type: 'button', class: 'btn', text: '수정', 'aria-label': opts.label + ' 수정' });
-      btn.addEventListener('click', edit);
-      wrap.appendChild(text);
-      wrap.appendChild(btn);
-      return btn;
+      var t = el('span', {
+        class: 'editable', tabindex: '0', role: 'button',
+        title: '클릭해서 수정',
+        'aria-label': opts.label + ': ' + opts.get() + ' (눌러서 수정)',
+        text: opts.get()
+      });
+      t.addEventListener('click', edit);
+      t.addEventListener('keydown', function (e) {
+        if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); edit(); }
+      });
+      wrap.appendChild(t);
+      return t;
     }
 
     function edit() {
       wrap.textContent = '';
-      var input = el('input', { type: 'text', maxlength: String(opts.max), 'aria-label': opts.label });
+      var input = el('input', { type: 'text', class: 'inline-input', maxlength: String(opts.max), 'aria-label': opts.label });
       input.value = opts.get();
-      var err = el('p', { class: 'field-error edit-err', role: 'alert' });
-      var save = el('button', { type: 'submit', class: 'btn primary', text: '저장' });
-      var cancel = el('button', { type: 'button', class: 'btn', text: '취소' });
-      var form = el('form', { class: 'edit-form ' + (opts.formCls || ''), novalidate: 'novalidate' }, [input, save, cancel]);
-      form.appendChild(err);
-      wrap.appendChild(form);
+      wrap.appendChild(input);
       input.focus();
       input.select();
-      cancel.addEventListener('click', function () { view().focus(); });
-      form.addEventListener('submit', function (e) {
-        e.preventDefault();
-        var v = input.value.trim();
-        if (!v) { err.textContent = '비워 둘 수 없습니다. 내용을 입력해 주세요.'; input.focus(); return; }
-        var prev = opts.get();
-        opts.set(v);
-        if (!saveProject(opts.project)) opts.set(prev);
+      var done = false;
+      function finish(save) {
+        if (done) return;
+        done = true;
+        if (save) {
+          var v = input.value.trim() || opts.def;
+          var prev = opts.get();
+          opts.set(v);
+          if (!saveProject(opts.project)) opts.set(prev);
+        }
         view().focus();
+      }
+      input.addEventListener('keydown', function (e) {
+        if (e.key === 'Enter') { e.preventDefault(); finish(true); }
+        else if (e.key === 'Escape') { e.preventDefault(); finish(false); }
       });
+      input.addEventListener('blur', function () { finish(true); });
     }
 
     view();
@@ -110,35 +122,26 @@
   /* ---------- 시작 화면 ---------- */
   function renderStart() {
     clear();
-    var team = el('input', { type: 'text', id: 'team', maxlength: '60', autocomplete: 'off' });
-    var proj = el('input', { type: 'text', id: 'proj', maxlength: '80', autocomplete: 'off' });
-    var node = el('input', { type: 'text', id: 'node', maxlength: '80', autocomplete: 'off' });
-    var err = el('p', { class: 'field-error', role: 'alert' });
-    var play = el('button', { type: 'submit', class: 'play', 'aria-label': '시작하기: 메인 화면으로 이동', text: '▶' });
+    var team = el('input', { type: 'text', id: 'team', maxlength: '60', autocomplete: 'off', placeholder: DEF.team });
+    var proj = el('input', { type: 'text', id: 'proj', maxlength: '80', autocomplete: 'off', placeholder: DEF.proj });
+    var node = el('input', { type: 'text', id: 'node', maxlength: '80', autocomplete: 'off', placeholder: DEF.node });
+    var play = el('button', { type: 'submit', class: 'play', 'aria-label': '시작하기: 메인 화면으로 이동', title: '시작하기', text: '▶' });
 
     var form = el('form', { class: 'fields', novalidate: 'novalidate' }, [
       el('label', { for: 'team', text: '팀 이름' }), team,
       el('label', { for: 'proj', text: '팀프로젝트 이름' }), proj,
-      el('p', { class: 'hint', text: '가명이나 임시 이름이어도 됩니다. 나중에 바꿀 수 있어요.' }),
-      el('label', { for: 'node', text: '첫 번째 기획(노드) 이름' }), node,
-      el('p', { class: 'hint', text: '기획 가지의 출발점이 됩니다. 나중에 바꿀 수 있어요.' }),
-      err,
-      el('div', { class: 'play-row' }, [play, el('span', { class: 'play-label', text: '눌러서 시작하기' })])
+      el('p', { class: 'hint', text: '가명이나 임시 이름이어도 됩니다. 비워 두면 기본 이름이 들어가고, 나중에 바꿀 수 있어요.' }),
+      el('label', { for: 'node', text: '시작 노드 이름' }),
+      el('div', { class: 'node-row' }, [node, play]),
+      el('p', { class: 'hint', text: '기획 가지의 출발점입니다. 입력하고 오른쪽 ▶를 누르면 메인 화면으로 이동합니다.' })
     ]);
 
     form.addEventListener('submit', function (e) {
       e.preventDefault();
-      var t = team.value.trim();
-      var n = proj.value.trim();
-      var f = node.value.trim();
-      var fields = [[t, team], [n, proj], [f, node]];
-      for (var i = 0; i < fields.length; i++) {
-        if (!fields[i][0]) {
-          err.textContent = '팀 이름, 프로젝트 이름, 첫 번째 기획 이름을 모두 입력해 주세요.';
-          fields[i][1].focus();
-          return;
-        }
-      }
+      // 비워 두면 기본 이름을 적어 넣는다
+      var t = team.value.trim() || DEF.team;
+      var n = proj.value.trim() || DEF.proj;
+      var f = node.value.trim() || DEF.node;
       var p = {
         id: newId(),
         teamName: t,
@@ -170,25 +173,26 @@
 
     // 1순위: 팀 이름 · 프로젝트 이름
     var teamEdit = editable({
-      project: p, tag: 'span', cls: 'name', label: '팀 이름', max: 60, wrapCls: 'team-line',
+      project: p, tag: 'p', cls: 'team-line', label: '팀 이름', max: 60, def: DEF.team,
       get: function () { return p.teamName; },
       set: function (v) { p.teamName = v; }
     });
     var projEdit = editable({
-      project: p, tag: 'h1', label: '프로젝트 이름', max: 80, formCls: 'big',
+      project: p, tag: 'h1', label: '프로젝트 이름', max: 80, def: DEF.proj,
       get: function () { return p.projectName; },
       set: function (v) { p.projectName = v; }
     });
     var top = el('header', { class: 'main-hero' }, [
       el('p', { class: 'section-label', text: '팀 · 프로젝트' }),
       teamEdit,
-      projEdit
+      projEdit,
+      el('p', { class: 'edit-tip', text: '이름에 마우스를 올리고 눌러서 수정하세요. Enter로 저장, 비우면 기본 이름이 들어갑니다.' })
     ]);
 
     // 2순위: 첫 번째 노드
     var first = p.nodes[0];
     var nodeEdit = editable({
-      project: p, tag: 'h2', label: '첫 번째 기획 이름', max: 80, formCls: 'big', wrapCls: 'node-title-line',
+      project: p, tag: 'h2', label: '시작 노드 이름', max: 80, def: DEF.node,
       get: function () { return first.title; },
       set: function (v) { first.title = v; }
     });
