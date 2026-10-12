@@ -1,0 +1,28 @@
+# Dependencies
+node_modules/
+
+# Build output and caches
+dist/
+build/
+.next/
+out/
+.nuxt/
+.output/
+.cache/
+.turbo/
+coverage/
+
+# Local environment and secrets
+.env
+.env.*
+!.env.example
+!.env.sample
+!.env.template
+
+# Logs
+*.log
+
+# OS files
+.DS_Store
+Thumbs.db
+Desktop.ini
