@@ -89,7 +89,8 @@
       var p = pos[n.id];
       var t = n.title || '(제목 없음)';
       var card = el('div', {
-        class: 'node' + (n.status === 'dropped' ? ' dropped' : '') + (n.id === S.selId ? ' sel' : ''),
+        class: 'node' + (n.status === 'dropped' ? ' dropped' : '') + (n.status === 'adopted' ? ' adopted' : '') + (n.id === S.selId ? ' sel' : ''),
+        'data-id': n.id,
         role: 'button', tabindex: '0',
         'aria-label': t + ', ' + S.A.STATUS[n.status] + (isRoot(n) ? ', 시작 노드' : '') + ', 눌러서 편집'
       });
@@ -112,7 +113,10 @@
       add.addEventListener('pointerdown', function (e) { e.stopPropagation(); });
       card.appendChild(add);
 
-      card.addEventListener('click', function () { select(n.id); });
+      card.addEventListener('click', function (e) {
+        if (isAdoptGesture(e, n, card)) return;
+        select(n.id);
+      });
       card.addEventListener('keydown', function (e) {
         if (e.target === card && (e.key === 'Enter' || e.key === ' ')) { e.preventDefault(); select(n.id); }
       });
@@ -332,6 +336,25 @@
     closePanel();
   }
 
+  // 카드 왼쪽의 굵은 선을 더블클릭하면 그 기획을 '채택'으로 바꾼다 (되돌리기는 상태 칸에서).
+  // 첫 클릭에서 카드가 다시 그려져 기본 dblclick 이벤트가 오지 않으므로, 같은 선을 연달아 두 번 누른 것을 직접 센다.
+  var lastLine = null;
+  function isAdoptGesture(e, n, card) {
+    var x = e.clientX - card.getBoundingClientRect().left;
+    var inLine = x <= Math.max(8, 16 * S.view.s);   // 왼쪽 굵은 선 부근
+    var now = Date.now();
+    var twice = inLine && lastLine && lastLine.id === n.id && now - lastLine.t < 450;
+    lastLine = inLine && !twice ? { id: n.id, t: now } : null;
+    if (!twice) return false;
+    if (n.status !== 'adopted') {
+      n.status = 'adopted';
+      S.A.persist();
+      if (S.selId === n.id) S.r.fStatus.value = n.status;
+      render();
+    }
+    return true;
+  }
+
   /* ---------- 화면 구성 ---------- */
   function field(labelText, control) {
     return el('label', { class: 'f' }, [document.createTextNode(labelText), control]);
@@ -545,7 +568,7 @@
         el('span', { class: 'share-title', text: 'export 공유링크 · 클라이언트용' }),
         exBtn, exOut, exMsg,
         el('span', { class: 'notice-inline', text: '누르는 시점의 내용으로 고정돼요. 이미지와 내부용 메모, 채택되지 않은 가지의 하위 가지는 담기지 않아요. 고친 내용은 새 링크로 만드세요.' }),
-        el('span', { class: 'zoomhint', text: '드래그: 이동 · 휠: 확대/축소 · 카드 클릭: 편집 · +: 가지 치기' })
+        el('span', { class: 'zoomhint', text: '드래그: 이동 · 휠: 확대/축소 · 카드 클릭: 편집 · +: 가지 치기 · 카드 왼쪽 굵은 선 더블클릭: 채택' })
       ])
     ]);
 

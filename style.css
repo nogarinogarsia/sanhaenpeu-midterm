@@ -12,6 +12,7 @@
   --gray: #d4d2cc;      /* 내부용(회색) 창 */
   --gray-line: #b3b0a8;
   --faint: #8a8578;     /* export 화면: 채택되지 않은 가지의 덜 읽히는 글자색 */
+  --adopt: #d0312d;     /* 메인 화면: 채택된 카드의 왼쪽 선 */
   --shadow: 0 1px 2px rgba(60, 50, 30, .12), 0 8px 28px rgba(60, 50, 30, .08);
   --lane0: #2b2a27; --lane1: #7b776d; --lane2: #4d4a43; --lane3: #9a9588;
   --lane4: #3a3833; --lane5: #6a665d; --lane6: #a8a396; --lane7: #55514a;
@@ -30,6 +31,7 @@
     --line: #44403a;
     --accent: #ece8dd;
     --accent-ink: #1f1d1a;
+    --adopt: #f0675f;
     --gray: #46443f;
     --gray-line: #5d5a54;
     --shadow: 0 1px 2px rgba(0, 0, 0, .4), 0 8px 28px rgba(0, 0, 0, .3);
@@ -201,6 +203,9 @@ input.inline-input[type="text"] {
   transition: box-shadow .15s, transform .15s;
 }
 .node:hover { transform: translateY(-2px); }
+/* 왼쪽 굵은 선 위에서 더블클릭하면 채택. 누를 수 있는 영역을 넓히고 손가락 커서를 보여준다. */
+.node::before { content: ""; position: absolute; left: -7px; top: 0; bottom: 0; width: 16px; cursor: pointer; }
+.node.adopted { border-left-color: var(--adopt); }
 .node.sel { outline: 3px solid var(--ink); outline-offset: 2px; }
 .node.dropped { opacity: .62; border-style: dashed; border-left-style: solid; }
 .node.dropped .nt { text-decoration: line-through; text-decoration-color: var(--muted); }
