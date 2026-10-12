@@ -18,7 +18,8 @@
       if (!raw) return null;
       var p = JSON.parse(raw);
       if (p && typeof p.teamName === 'string' && typeof p.projectName === 'string' &&
-          typeof p.id === 'string' && Array.isArray(p.nodes)) return p;
+          typeof p.id === 'string' && Array.isArray(p.nodes) && p.nodes.length &&
+          typeof p.nodes[0].title === 'string') return p;
       showAlert('저장된 데이터 형식이 올바르지 않아 불러오지 못했습니다. 기존 데이터는 삭제하지 않았습니다.');
       return null;
     } catch (e) {
@@ -60,42 +61,100 @@
 
   function clear() { app.textContent = ''; }
 
+  /*
+   * 제자리 수정 위젯: 텍스트 + [수정] 버튼. 누르면 입력칸으로 바뀌고 저장/취소한다.
+   * opts: tag, cls, label(접근성 이름), max, get(), set(v), formCls
+   * 저장 실패 시 이전 값으로 되돌린다.
+   */
+  function editable(opts) {
+    var wrap = el('div', { class: opts.wrapCls || 'project-line' });
+
+    function view() {
+      wrap.textContent = '';
+      var text = el(opts.tag, { class: opts.cls || '', text: opts.get() });
+      var btn = el('button', { type: 'button', class: 'btn', text: '수정', 'aria-label': opts.label + ' 수정' });
+      btn.addEventListener('click', edit);
+      wrap.appendChild(text);
+      wrap.appendChild(btn);
+      return btn;
+    }
+
+    function edit() {
+      wrap.textContent = '';
+      var input = el('input', { type: 'text', maxlength: String(opts.max), 'aria-label': opts.label });
+      input.value = opts.get();
+      var err = el('p', { class: 'field-error edit-err', role: 'alert' });
+      var save = el('button', { type: 'submit', class: 'btn primary', text: '저장' });
+      var cancel = el('button', { type: 'button', class: 'btn', text: '취소' });
+      var form = el('form', { class: 'edit-form ' + (opts.formCls || ''), novalidate: 'novalidate' }, [input, save, cancel]);
+      form.appendChild(err);
+      wrap.appendChild(form);
+      input.focus();
+      input.select();
+      cancel.addEventListener('click', function () { view().focus(); });
+      form.addEventListener('submit', function (e) {
+        e.preventDefault();
+        var v = input.value.trim();
+        if (!v) { err.textContent = '비워 둘 수 없습니다. 내용을 입력해 주세요.'; input.focus(); return; }
+        var prev = opts.get();
+        opts.set(v);
+        if (!saveProject(opts.project)) opts.set(prev);
+        view().focus();
+      });
+    }
+
+    view();
+    return wrap;
+  }
+
   /* ---------- 시작 화면 ---------- */
   function renderStart() {
     clear();
     var team = el('input', { type: 'text', id: 'team', maxlength: '60', autocomplete: 'off' });
     var proj = el('input', { type: 'text', id: 'proj', maxlength: '80', autocomplete: 'off' });
+    var node = el('input', { type: 'text', id: 'node', maxlength: '80', autocomplete: 'off' });
     var err = el('p', { class: 'field-error', role: 'alert' });
-    var form = el('form', { novalidate: 'novalidate' }, [
+    var play = el('button', { type: 'submit', class: 'play', 'aria-label': '시작하기: 메인 화면으로 이동', text: '▶' });
+
+    var form = el('form', { class: 'fields', novalidate: 'novalidate' }, [
       el('label', { for: 'team', text: '팀 이름' }), team,
       el('label', { for: 'proj', text: '팀프로젝트 이름' }), proj,
-      el('p', { class: 'muted', text: '프로젝트 이름은 가명이나 임시 이름이어도 되고, 나중에 바꿀 수 있습니다.' }),
+      el('p', { class: 'hint', text: '가명이나 임시 이름이어도 됩니다. 나중에 바꿀 수 있어요.' }),
+      el('label', { for: 'node', text: '첫 번째 기획(노드) 이름' }), node,
+      el('p', { class: 'hint', text: '기획 가지의 출발점이 됩니다. 나중에 바꿀 수 있어요.' }),
       err,
-      el('button', { type: 'submit', class: 'primary', text: '시작하기' })
+      el('div', { class: 'play-row' }, [play, el('span', { class: 'play-label', text: '눌러서 시작하기' })])
     ]);
+
     form.addEventListener('submit', function (e) {
       e.preventDefault();
       var t = team.value.trim();
       var n = proj.value.trim();
-      if (!t || !n) {
-        err.textContent = '팀 이름과 프로젝트 이름을 모두 입력해 주세요.';
-        (t ? proj : team).focus();
-        return;
+      var f = node.value.trim();
+      var fields = [[t, team], [n, proj], [f, node]];
+      for (var i = 0; i < fields.length; i++) {
+        if (!fields[i][0]) {
+          err.textContent = '팀 이름, 프로젝트 이름, 첫 번째 기획 이름을 모두 입력해 주세요.';
+          fields[i][1].focus();
+          return;
+        }
       }
       var p = {
         id: newId(),
         teamName: t,
         projectName: n,
         createdAt: new Date().toISOString(),
-        // 가지(노드) 데이터는 다음 단계에서 확장한다. 지금은 시작 노드 1개.
-        nodes: [{ id: newId(), title: '시작', parentId: null }]
+        // 가지(노드) 데이터는 다음 단계에서 확장한다. 지금은 첫 노드 1개.
+        nodes: [{ id: newId(), title: f, parentId: null }]
       };
       if (saveProject(p)) location.hash = '#/main';
     });
-    app.appendChild(el('section', { class: 'card' }, [
-      el('h1', { text: '팀프로젝트 기획 기록' }),
-      el('p', { class: 'muted', text: '기획 방향이 어떻게 바뀌고 갈라졌는지 기록합니다.' }),
-      form
+
+    app.appendChild(el('header', { class: 'hero' }, [
+      el('h1', { text: '우리 기획의 변화를 기록합니다' }),
+      el('p', { class: 'lead', text: '팀프로젝트의 기획 방향이 어떻게 바뀌고 갈라졌는지, 한눈에 볼 수 있게 남겨 두세요.' }),
+      form,
+      el('div', { class: 'down', 'aria-hidden': 'true', text: '↓ 정보를 입력하고 ▶를 눌러 보세요' })
     ]));
     team.focus();
   }
@@ -109,90 +168,76 @@
   function renderMain(p) {
     clear();
 
-    // 헤더: 팀 이름 + 프로젝트 이름(수정 가능)
-    var titleH1 = el('h1', { text: p.projectName });
-    var editBtn = el('button', { type: 'button', text: '이름 변경' });
-    var titleRow = el('div', { class: 'title-row' }, [titleH1, editBtn]);
-    var header = el('section', { class: 'card' }, [
-      el('p', { class: 'muted', text: '팀: ' + p.teamName }),
-      titleRow
+    // 1순위: 팀 이름 · 프로젝트 이름
+    var teamEdit = editable({
+      project: p, tag: 'span', cls: 'name', label: '팀 이름', max: 60, wrapCls: 'team-line',
+      get: function () { return p.teamName; },
+      set: function (v) { p.teamName = v; }
+    });
+    var projEdit = editable({
+      project: p, tag: 'h1', label: '프로젝트 이름', max: 80, formCls: 'big',
+      get: function () { return p.projectName; },
+      set: function (v) { p.projectName = v; }
+    });
+    var top = el('header', { class: 'main-hero' }, [
+      el('p', { class: 'section-label', text: '팀 · 프로젝트' }),
+      teamEdit,
+      projEdit
     ]);
 
-    editBtn.addEventListener('click', function () {
-      var input = el('input', { type: 'text', maxlength: '80', 'aria-label': '새 프로젝트 이름' });
-      input.value = p.projectName;
-      var err = el('p', { class: 'field-error', role: 'alert' });
-      var save = el('button', { type: 'submit', class: 'primary', text: '저장' });
-      var cancel = el('button', { type: 'button', text: '취소' });
-      var form = el('form', { class: 'title-edit', novalidate: 'novalidate' }, [input, save, cancel]);
-      titleRow.replaceWith(form);
-      header.appendChild(err);
-      input.focus();
-      cancel.addEventListener('click', function () { renderMain(p); });
-      form.addEventListener('submit', function (e) {
-        e.preventDefault();
-        var v = input.value.trim();
-        if (!v) { err.textContent = '프로젝트 이름을 입력해 주세요.'; return; }
-        var prev = p.projectName;
-        p.projectName = v;
-        if (!saveProject(p)) p.projectName = prev;
-        renderMain(p);
-      });
+    // 2순위: 첫 번째 노드
+    var first = p.nodes[0];
+    var nodeEdit = editable({
+      project: p, tag: 'h2', label: '첫 번째 기획 이름', max: 80, formCls: 'big', wrapCls: 'node-title-line',
+      get: function () { return first.title; },
+      set: function (v) { first.title = v; }
     });
+    var nodeSec = el('section', { class: 'node-section', 'aria-label': '첫 번째 기획' }, [
+      el('p', { class: 'section-label', text: '기획 방향' }),
+      el('div', { class: 'node-card' }, [
+        el('div', { class: 'node-meta' }, [el('span', { text: '01' }), el('span', { class: 'chip', text: '시작점' })]),
+        nodeEdit,
+        el('p', { class: 'note', text: '기획이 이어지고 갈라지는 흐름이 이 아래로 쌓입니다. 노드 추가는 다음 단계에서 만듭니다.' })
+      ])
+    ]);
 
-    // share 공유링크 (자리 표시)
+    // 3순위: share 공유링크 (자리 표시, 작게)
     var linkInput = el('input', { type: 'text', readonly: 'readonly', id: 'share', 'aria-label': 'share 공유링크' });
     linkInput.value = shareUrl(p);
-    var copyBtn = el('button', { type: 'button', text: '복사' });
-    var copyMsg = el('p', { class: 'muted', role: 'status' });
+    var copyBtn = el('button', { type: 'button', class: 'btn', text: '복사' });
+    var copyMsg = el('p', { class: 'copy-msg', role: 'status' });
     copyBtn.addEventListener('click', function () {
       linkInput.select();
       var ok = false;
       try { ok = document.execCommand('copy'); } catch (e) { ok = false; }
       copyMsg.textContent = ok ? '복사했습니다.' : '복사하지 못했습니다. 주소를 직접 선택해 복사해 주세요.';
     });
-    var share = el('section', { class: 'card' }, [
-      el('h2', { text: 'share 공유링크' }),
-      el('p', { class: 'muted', text: '팀원에게 편집 권한을 주는 링크입니다.' }),
+    var shareSec = el('section', { class: 'share-section', 'aria-label': 'share 공유링크' }, [
+      el('p', { class: 'share-title', text: 'share 공유링크 · 팀원 편집용' }),
       el('div', { class: 'link-row' }, [linkInput, copyBtn]),
       copyMsg,
-      el('p', { class: 'notice', text: '준비 중: 지금은 링크 표시와 복사만 가능합니다. 이 주소에는 프로젝트 내용이 담겨 있지 않아 다른 기기에서는 내용이 열리지 않으며, 최신 내용 갱신 기능도 아직 없습니다.' })
+      el('p', { class: 'notice', text: '준비 중: 지금은 링크 표시와 복사만 가능합니다. 이 주소에는 프로젝트 내용이 담겨 있지 않아 다른 기기에서는 열리지 않으며, 최신 내용 갱신 기능도 아직 없습니다.' })
     ]);
 
-    // 가지 영역
-    var list = el('ol', { class: 'branch', 'aria-label': '기획 가지' });
-    p.nodes.forEach(function (n) {
-      list.appendChild(el('li', {}, [
-        el('div', { class: 'node' }, [
-          el('span', { class: 'tag', text: '현재' }),
-          el('span', { text: n.title })
-        ])
-      ]));
-    });
-    var branch = el('section', { class: 'card' }, [
-      el('h2', { text: '기획 방향' }),
-      el('p', { class: 'muted', text: '기획이 이어지고 갈라지는 흐름이 여기에 표시됩니다. 노드 추가는 다음 단계에서 만듭니다.' }),
-      list
-    ]);
-
-    app.appendChild(header);
-    app.appendChild(share);
-    app.appendChild(branch);
-    app.appendChild(el('p', { class: 'muted', text: '이 기록은 이 브라우저에 저장됩니다. 브라우저 데이터를 삭제하면 사라질 수 있습니다.' }));
+    app.appendChild(top);
+    app.appendChild(nodeSec);
+    app.appendChild(shareSec);
+    app.appendChild(el('p', { class: 'footnote', text: '이 기록은 이 브라우저에 저장됩니다. 브라우저 데이터를 삭제하면 사라질 수 있습니다.' }));
   }
 
   /* ---------- share 링크로 들어온 경우 (자리 표시) ---------- */
   function renderSharePlaceholder() {
     clear();
     var p = loadProject();
-    var actions = [];
-    var back = el('button', { type: 'button', class: 'primary', text: p ? '내 프로젝트 열기' : '시작 화면으로' });
+    var back = el('button', { type: 'button', class: 'btn primary', text: p ? '내 프로젝트 열기' : '시작 화면으로' });
     back.addEventListener('click', function () { location.hash = p ? '#/main' : '#/start'; });
-    actions.push(back);
-    app.appendChild(el('section', { class: 'card' }, [
-      el('h1', { text: 'share 공유링크 준비 중' }),
-      el('p', { text: '이 링크로 다른 사람의 프로젝트를 여는 기능은 아직 만들지 않았습니다.' })
-    ].concat(actions)));
+    app.appendChild(el('div', { class: 'hero' }, [
+      el('div', { class: 'card-plain' }, [
+        el('h2', { text: 'share 공유링크 준비 중' }),
+        el('p', { text: '이 링크로 다른 사람의 프로젝트를 여는 기능은 아직 만들지 않았습니다.' }),
+        back
+      ])
+    ]));
   }
 
   /* ---------- 라우터 ---------- */
