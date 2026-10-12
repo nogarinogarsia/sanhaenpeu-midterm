@@ -1,53 +1,24 @@
 (function () {
   'use strict';
 
-  var STORAGE_KEY = 'planning-history-project';
+  var LEGACY_KEY = 'planning-history-project'; // 이전 버전(localStorage) 데이터
+  var DB_NAME = 'planning-history';
+  var STORE = 'kv';
+  var KEY = 'project';
+  var DEF = { team: '팀이름', proj: '프로젝트명', node: '시작노드' };
+  var STATUS = { idea: '아이디어', active: '진행중', adopted: '채택', dropped: '폐기' };
+
   var app = document.getElementById('app');
   var alertBox = document.getElementById('alert');
+  var current = null;   // 지금 열려 있는 프로젝트
+  var corrupt = false;  // 저장된 데이터를 읽었지만 형식이 올바르지 않았는지
 
-  /* ---------- 저장소 ---------- */
+  /* ---------- 공용 헬퍼 ---------- */
   function showAlert(msg) {
     alertBox.textContent = msg;
     alertBox.hidden = !msg;
   }
 
-  // 저장된 프로젝트 읽기. 손상된 데이터는 덮어쓰지 않고 알린다.
-  function loadProject() {
-    try {
-      var raw = localStorage.getItem(STORAGE_KEY);
-      if (!raw) return null;
-      var p = JSON.parse(raw);
-      if (p && typeof p.teamName === 'string' && typeof p.projectName === 'string' &&
-          typeof p.id === 'string' && Array.isArray(p.nodes) && p.nodes.length &&
-          typeof p.nodes[0].title === 'string') return p;
-      showAlert('저장된 데이터 형식이 올바르지 않아 불러오지 못했습니다. 기존 데이터는 삭제하지 않았습니다.');
-      return null;
-    } catch (e) {
-      showAlert('저장된 데이터를 읽지 못했습니다. 브라우저 저장소 설정을 확인해 주세요.');
-      return null;
-    }
-  }
-
-  function saveProject(p) {
-    try {
-      localStorage.setItem(STORAGE_KEY, JSON.stringify(p));
-      showAlert('');
-      return true;
-    } catch (e) {
-      showAlert('저장에 실패했습니다. 변경 내용이 새로고침하면 사라질 수 있습니다.');
-      return false;
-    }
-  }
-
-  function newId() {
-    var a = new Uint8Array(8);
-    crypto.getRandomValues(a);
-    return Array.prototype.map.call(a, function (b) {
-      return ('0' + b.toString(16)).slice(-2);
-    }).join('');
-  }
-
-  /* ---------- DOM 헬퍼 ---------- */
   function el(tag, attrs, children) {
     var n = document.createElement(tag);
     Object.keys(attrs || {}).forEach(function (k) {
@@ -59,16 +30,176 @@
     return n;
   }
 
-  function clear() { app.textContent = ''; }
+  function newId() {
+    var a = new Uint8Array(8);
+    crypto.getRandomValues(a);
+    return Array.prototype.map.call(a, function (b) {
+      return ('0' + b.toString(16)).slice(-2);
+    }).join('');
+  }
 
-  // 비워 두면 다시 적히는 기본 이름
-  var DEF = { team: '팀이름', proj: '프로젝트명', node: '시작노드' };
+  function today() {
+    var d = new Date();
+    return d.getFullYear() + '-' + ('0' + (d.getMonth() + 1)).slice(-2) + '-' + ('0' + d.getDate()).slice(-2);
+  }
+
+  function withTimeout(promise, ms) {
+    return new Promise(function (resolve, reject) {
+      var t = setTimeout(function () { reject(new Error('timeout')); }, ms);
+      promise.then(function (v) { clearTimeout(t); resolve(v); },
+                   function (e) { clearTimeout(t); reject(e); });
+    });
+  }
+
+  function clear() {
+    if (window.Branch) window.Branch.unmount();
+    document.body.classList.remove('is-main');
+    app.textContent = '';
+  }
+
+  /* ---------- 저장소 (IndexedDB, 실패 시 localStorage) ---------- */
+  var dbp = null;
+  function openDb() {
+    if (!dbp) {
+      dbp = new Promise(function (resolve, reject) {
+        try {
+          var r = indexedDB.open(DB_NAME, 1);
+          r.onupgradeneeded = function () { r.result.createObjectStore(STORE); };
+          r.onsuccess = function () { resolve(r.result); };
+          r.onerror = function () { reject(r.error); };
+        } catch (e) { reject(e); }
+      });
+    }
+    return dbp;
+  }
+
+  function idbGet() {
+    return openDb().then(function (d) {
+      return new Promise(function (resolve, reject) {
+        var q = d.transaction(STORE).objectStore(STORE).get(KEY);
+        q.onsuccess = function () { resolve(q.result); };
+        q.onerror = function () { reject(q.error); };
+      });
+    });
+  }
+
+  function idbPut(value) {
+    return openDb().then(function (d) {
+      return new Promise(function (resolve, reject) {
+        var t = d.transaction(STORE, 'readwrite');
+        t.objectStore(STORE).put(value, KEY);
+        t.oncomplete = function () { resolve(); };
+        t.onerror = function () { reject(t.error); };
+        t.onabort = function () { reject(t.error); };
+      });
+    });
+  }
+
+  // 저장된 값을 검증·보정한다. 형식이 올바르지 않으면 null.
+  function normalize(p) {
+    if (!p || typeof p !== 'object' || typeof p.id !== 'string' ||
+        typeof p.teamName !== 'string' || typeof p.projectName !== 'string' ||
+        !Array.isArray(p.nodes) || !p.nodes.length) return null;
+    var created = typeof p.createdAt === 'string' && p.createdAt ? p.createdAt.slice(0, 10) : today();
+    var ids = {};
+    var nodes = [];
+    for (var i = 0; i < p.nodes.length; i++) {
+      var n = p.nodes[i];
+      if (!n || typeof n.id !== 'string' || typeof n.title !== 'string') return null;
+      ids[n.id] = true;
+      nodes.push({
+        id: n.id,
+        parentId: typeof n.parentId === 'string' ? n.parentId : null,
+        title: n.title,
+        date: typeof n.date === 'string' && n.date ? n.date : created,
+        status: STATUS[n.status] ? n.status : 'idea',
+        text: typeof n.text === 'string' ? n.text : '',
+        images: Array.isArray(n.images) ? n.images.filter(function (s) { return typeof s === 'string'; }) : [],
+        createdAt: typeof n.createdAt === 'number' ? n.createdAt : i
+      });
+    }
+    var hasRoot = false;
+    for (var j = 0; j < nodes.length; j++) {
+      if (nodes[j].parentId === null) hasRoot = true;
+      else if (!ids[nodes[j].parentId]) return null;
+    }
+    if (!hasRoot) return null;
+    // 내부용 내용은 노드와 분리해서 보관한다.
+    var internal = {};
+    if (p.internal && typeof p.internal === 'object') {
+      Object.keys(p.internal).forEach(function (k) {
+        var v = p.internal[k];
+        if (ids[k] && v && typeof v.discuss === 'string') internal[k] = { discuss: v.discuss };
+      });
+    }
+    return { id: p.id, teamName: p.teamName, projectName: p.projectName, createdAt: p.createdAt || new Date().toISOString(), nodes: nodes, internal: internal };
+  }
+
+  function loadProject() {
+    return withTimeout(idbGet(), 3000).then(function (v) { return v; }, function () { return undefined; })
+      .then(function (raw) {
+        if (raw === undefined) {
+          try {
+            var s = localStorage.getItem(LEGACY_KEY);
+            raw = s ? JSON.parse(s) : null;
+          } catch (e) {
+            corrupt = true;
+            showAlert('저장된 데이터를 읽지 못했습니다. 기존 데이터는 삭제하지 않았습니다.');
+            return null;
+          }
+        }
+        if (raw == null) return null;
+        var p = normalize(raw);
+        if (!p) {
+          corrupt = true;
+          showAlert('저장된 데이터 형식이 올바르지 않아 불러오지 못했습니다. 기존 데이터는 삭제하지 않았습니다.');
+          return null;
+        }
+        return p;
+      });
+  }
+
+  var saveTimer = null;
+  var saveChain = Promise.resolve(true);
+
+  function doSave(p) {
+    return idbPut(p).then(function () {
+      showAlert('');
+      return true;
+    }, function () {
+      try {
+        localStorage.setItem(LEGACY_KEY, JSON.stringify(p));
+        showAlert('');
+        return true;
+      } catch (e) {
+        showAlert('저장에 실패했습니다. 변경 내용이 새로고침하면 사라질 수 있습니다. (이미지가 너무 크거나 브라우저 저장 공간이 부족할 수 있어요)');
+        return false;
+      }
+    });
+  }
+
+  // 즉시 저장 (Promise<boolean>)
+  function saveNow() {
+    clearTimeout(saveTimer);
+    saveTimer = null;
+    var p = current;
+    if (!p) return Promise.resolve(false);
+    saveChain = saveChain.then(function () { return doSave(p); });
+    return saveChain;
+  }
+
+  // 입력 중에는 잠깐 모아서 저장
+  function persist() {
+    clearTimeout(saveTimer);
+    saveTimer = setTimeout(saveNow, 300);
+  }
+
+  window.addEventListener('pagehide', function () { if (saveTimer) saveNow(); });
 
   /*
    * 글자를 눌러(또는 Tab 후 Enter) 바로 수정하는 위젯. 수정 버튼은 없다.
    * Enter·바깥 클릭 = 저장, Esc = 취소. 비우면 기본 이름(def)이 다시 적힌다.
-   * 저장 실패 시 이전 값으로 되돌린다.
-   * opts: tag(제목 태그), cls, label(접근성 이름), max, def, project, get(), set(v)
+   * opts: tag, cls, label(접근성 이름), max, def, get(), set(v)
    */
   function editable(opts) {
     var wrap = el(opts.tag, { class: opts.cls || '' });
@@ -101,16 +232,14 @@
         if (done) return;
         done = true;
         if (save) {
-          var v = input.value.trim() || opts.def;
-          var prev = opts.get();
-          opts.set(v);
-          if (!saveProject(opts.project)) opts.set(prev);
+          opts.set(input.value.trim() || opts.def);
+          persist();
         }
         view().focus();
       }
       input.addEventListener('keydown', function (e) {
         if (e.key === 'Enter') { e.preventDefault(); finish(true); }
-        else if (e.key === 'Escape') { e.preventDefault(); finish(false); }
+        else if (e.key === 'Escape') { e.preventDefault(); e.stopPropagation(); finish(false); }
       });
       input.addEventListener('blur', function () { finish(true); });
     }
@@ -119,9 +248,15 @@
     return wrap;
   }
 
+  window.App = {
+    el: el, editable: editable, persist: persist, saveNow: saveNow, showAlert: showAlert,
+    newId: newId, today: today, DEF: DEF, STATUS: STATUS
+  };
+
   /* ---------- 시작 화면 ---------- */
   function renderStart() {
     clear();
+    app.className = 'page';
     var team = el('input', { type: 'text', id: 'team', maxlength: '60', autocomplete: 'off', placeholder: DEF.team });
     var proj = el('input', { type: 'text', id: 'proj', maxlength: '80', autocomplete: 'off', placeholder: DEF.proj });
     var node = el('input', { type: 'text', id: 'node', maxlength: '80', autocomplete: 'off', placeholder: DEF.node });
@@ -138,19 +273,24 @@
 
     form.addEventListener('submit', function (e) {
       e.preventDefault();
-      // 비워 두면 기본 이름을 적어 넣는다
-      var t = team.value.trim() || DEF.team;
-      var n = proj.value.trim() || DEF.proj;
-      var f = node.value.trim() || DEF.node;
-      var p = {
+      if (corrupt && !window.confirm('저장된 기존 데이터를 읽지 못한 상태입니다. 새로 시작하면 기존 데이터를 덮어씁니다. 계속할까요?')) return;
+      play.disabled = true;
+      var d = today();
+      current = {
         id: newId(),
-        teamName: t,
-        projectName: n,
+        teamName: team.value.trim() || DEF.team,
+        projectName: proj.value.trim() || DEF.proj,
         createdAt: new Date().toISOString(),
-        // 가지(노드) 데이터는 다음 단계에서 확장한다. 지금은 첫 노드 1개.
-        nodes: [{ id: newId(), title: f, parentId: null }]
+        nodes: [{
+          id: newId(), parentId: null, title: node.value.trim() || DEF.node,
+          date: d, status: 'idea', text: '', images: [], createdAt: Date.now()
+        }],
+        internal: {}
       };
-      if (saveProject(p)) location.hash = '#/main';
+      saveNow().then(function (ok) {
+        play.disabled = false;
+        if (ok) { corrupt = false; location.hash = '#/main'; }
+      });
     });
 
     app.appendChild(el('header', { class: 'hero' }, [
@@ -162,79 +302,19 @@
     team.focus();
   }
 
-  /* ---------- 메인 화면 ---------- */
-  function shareUrl(p) {
-    // 자리 표시용 주소. 데이터가 담기지 않으므로 다른 기기에서는 내용이 열리지 않는다.
-    return location.origin + location.pathname + '#/share/' + p.id;
-  }
-
+  /* ---------- 메인 화면 (가지도) ---------- */
   function renderMain(p) {
     clear();
-
-    // 1순위: 팀 이름 · 프로젝트 이름
-    var teamEdit = editable({
-      project: p, tag: 'p', cls: 'team-line', label: '팀 이름', max: 60, def: DEF.team,
-      get: function () { return p.teamName; },
-      set: function (v) { p.teamName = v; }
-    });
-    var projEdit = editable({
-      project: p, tag: 'h1', label: '프로젝트 이름', max: 80, def: DEF.proj,
-      get: function () { return p.projectName; },
-      set: function (v) { p.projectName = v; }
-    });
-    var top = el('header', { class: 'main-hero' }, [
-      el('p', { class: 'section-label', text: '팀 · 프로젝트' }),
-      teamEdit,
-      projEdit,
-      el('p', { class: 'edit-tip', text: '이름에 마우스를 올리고 눌러서 수정하세요. Enter로 저장, 비우면 기본 이름이 들어갑니다.' })
-    ]);
-
-    // 2순위: 첫 번째 노드
-    var first = p.nodes[0];
-    var nodeEdit = editable({
-      project: p, tag: 'h2', label: '시작 노드 이름', max: 80, def: DEF.node,
-      get: function () { return first.title; },
-      set: function (v) { first.title = v; }
-    });
-    var nodeSec = el('section', { class: 'node-section', 'aria-label': '첫 번째 기획' }, [
-      el('p', { class: 'section-label', text: '기획 방향' }),
-      el('div', { class: 'node-card' }, [
-        el('div', { class: 'node-meta' }, [el('span', { text: '01' }), el('span', { class: 'chip', text: '시작점' })]),
-        nodeEdit,
-        el('p', { class: 'note', text: '기획이 이어지고 갈라지는 흐름이 이 아래로 쌓입니다. 노드 추가는 다음 단계에서 만듭니다.' })
-      ])
-    ]);
-
-    // 3순위: share 공유링크 (자리 표시, 작게)
-    var linkInput = el('input', { type: 'text', readonly: 'readonly', id: 'share', 'aria-label': 'share 공유링크' });
-    linkInput.value = shareUrl(p);
-    var copyBtn = el('button', { type: 'button', class: 'btn', text: '복사' });
-    var copyMsg = el('p', { class: 'copy-msg', role: 'status' });
-    copyBtn.addEventListener('click', function () {
-      linkInput.select();
-      var ok = false;
-      try { ok = document.execCommand('copy'); } catch (e) { ok = false; }
-      copyMsg.textContent = ok ? '복사했습니다.' : '복사하지 못했습니다. 주소를 직접 선택해 복사해 주세요.';
-    });
-    var shareSec = el('section', { class: 'share-section', 'aria-label': 'share 공유링크' }, [
-      el('p', { class: 'share-title', text: 'share 공유링크 · 팀원 편집용' }),
-      el('div', { class: 'link-row' }, [linkInput, copyBtn]),
-      copyMsg,
-      el('p', { class: 'notice', text: '준비 중: 지금은 링크 표시와 복사만 가능합니다. 이 주소에는 프로젝트 내용이 담겨 있지 않아 다른 기기에서는 열리지 않으며, 최신 내용 갱신 기능도 아직 없습니다.' })
-    ]);
-
-    app.appendChild(top);
-    app.appendChild(nodeSec);
-    app.appendChild(shareSec);
-    app.appendChild(el('p', { class: 'footnote', text: '이 기록은 이 브라우저에 저장됩니다. 브라우저 데이터를 삭제하면 사라질 수 있습니다.' }));
+    app.className = 'main-root';
+    window.Branch.mount(app, p, window.App);
   }
 
   /* ---------- share 링크로 들어온 경우 (자리 표시) ---------- */
   function renderSharePlaceholder() {
     clear();
-    var p = loadProject();
-    var back = el('button', { type: 'button', class: 'btn primary', text: p ? '내 프로젝트 열기' : '시작 화면으로' });
-    back.addEventListener('click', function () { location.hash = p ? '#/main' : '#/start'; });
+    app.className = 'page';
+    var back = el('button', { type: 'button', class: 'btn primary', text: current ? '내 프로젝트 열기' : '시작 화면으로' });
+    back.addEventListener('click', function () { location.hash = current ? '#/main' : '#/start'; });
     app.appendChild(el('div', { class: 'hero' }, [
       el('div', { class: 'card-plain' }, [
         el('h2', { text: 'share 공유링크 준비 중' }),
@@ -248,15 +328,17 @@
   function route() {
     var h = location.hash || '';
     if (h.indexOf('#/share/') === 0) return renderSharePlaceholder();
-    var p = loadProject();
-    if (p) {
+    if (current) {
       if (h !== '#/main') { location.hash = '#/main'; return; }
-      return renderMain(p);
+      return renderMain(current);
     }
     if (h !== '#/start') { location.hash = '#/start'; return; }
     renderStart();
   }
 
-  window.addEventListener('hashchange', route);
-  route();
+  loadProject().then(function (p) {
+    current = p;
+    window.addEventListener('hashchange', route);
+    route();
+  });
 })();
