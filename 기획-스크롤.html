@@ -1,0 +1,163 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>기획 스크롤</title>
+<style>
+:root{--bg:#f6f3ec;--card:#fffdf8;--ink:#2b2a27;--muted:#7b776d;--line:#d8d2c4;--accent:#3f7a52;--shadow:0 1px 2px rgba(60,50,30,.12),0 8px 28px rgba(60,50,30,.08)}
+@media (prefers-color-scheme:dark){:root{--bg:#1d1c19;--card:#2a2925;--ink:#ece8dd;--muted:#9a9588;--line:#44413a;--accent:#6fb384;--shadow:0 1px 2px rgba(0,0,0,.4),0 8px 28px rgba(0,0,0,.3)}}
+*{box-sizing:border-box}
+html{scroll-behavior:smooth}
+body{margin:0;background:var(--bg);color:var(--ink);font-family:"Pretendard","Noto Sans KR","Malgun Gothic",system-ui,sans-serif;line-height:1.7}
+button{font:inherit;color:inherit;cursor:pointer}
+.btn{border:1px solid var(--line);background:var(--card);border-radius:8px;padding:6px 12px;font-size:13px;white-space:nowrap}
+.btn:hover{border-color:var(--accent)}
+#bar{position:fixed;top:0;left:0;height:3px;background:var(--accent);width:0;z-index:30}
+#tools{position:fixed;top:12px;right:14px;display:flex;gap:6px;z-index:25}
+
+.hero{min-height:92vh;display:flex;flex-direction:column;justify-content:center;padding:0 8vw;max-width:1000px;margin:0 auto}
+.hero h1{font-size:clamp(34px,7vw,68px);line-height:1.15;margin:0 0 18px;letter-spacing:-.03em}
+.hero p{color:var(--muted);font-size:18px;max-width:34em;margin:0}
+.hero .down{margin-top:40px;color:var(--accent);font-size:14px;animation:bob 1.8s ease-in-out infinite}
+@keyframes bob{50%{transform:translateY(8px)}}
+
+main{position:relative;max-width:1000px;margin:0 auto;padding:0 20px 40vh 100px}
+/* spine */
+main::before{content:"";position:absolute;left:46px;top:0;bottom:30vh;width:4px;border-radius:4px;background:var(--line)}
+#spine{position:absolute;left:46px;top:0;width:4px;border-radius:4px;background:var(--accent);height:0;z-index:1}
+
+.step{position:relative;margin:0 0 22vh;opacity:0;transform:translateY(40px);transition:opacity .7s,transform .7s}
+.step.in{opacity:1;transform:none}
+.dot{position:absolute;left:-62px;top:10px;width:22px;height:22px;border-radius:50%;background:var(--bg);border:4px solid var(--c);z-index:2;transition:transform .3s,background .3s}
+.step.active .dot{background:var(--c);transform:scale(1.3)}
+.branchtag{position:absolute;left:-100px;top:42px;width:96px;text-align:right;font-size:11px;color:var(--muted);line-height:1.3;padding-right:10px}
+.meta{display:flex;gap:10px;align-items:center;font-size:13px;color:var(--muted);margin-bottom:6px;flex-wrap:wrap}
+.chip{font-size:11.5px;padding:1px 9px;border-radius:99px;color:#fff;background:var(--sc)}
+.step h2{font-size:clamp(24px,4vw,38px);line-height:1.25;margin:0 0 14px;letter-spacing:-.02em;word-break:keep-all}
+.step.dropped h2{text-decoration:line-through;text-decoration-color:var(--muted);color:var(--muted)}
+.step.dropped .card{opacity:.8;border-style:dashed}
+.card{background:var(--card);border:1px solid var(--line);border-left:6px solid var(--c);border-radius:14px;padding:22px 26px;box-shadow:var(--shadow)}
+.card p{margin:0;white-space:pre-wrap;font-size:16.5px}
+.card p:empty{display:none}
+.from{margin-top:14px;font-size:13px;color:var(--muted)}
+.from b{color:var(--ink);font-weight:600}
+.gal{display:grid;grid-template-columns:repeat(auto-fill,minmax(220px,1fr));gap:10px;margin-top:16px}
+.gal img{width:100%;aspect-ratio:4/3;object-fit:cover;border-radius:10px;border:1px solid var(--line);cursor:zoom-in;display:block}
+.gal.one{grid-template-columns:1fr}.gal.one img{aspect-ratio:auto;max-height:460px;object-fit:contain;background:var(--bg)}
+.end{text-align:center;color:var(--muted);padding:10vh 0 20vh}
+#lb{position:fixed;inset:0;background:rgba(0,0,0,.86);z-index:50;display:none;align-items:center;justify-content:center;cursor:zoom-out}
+#lb.open{display:flex}#lb img{max-width:92vw;max-height:92vh;border-radius:6px}
+@media (max-width:640px){main{padding-left:56px}main::before,#spine{left:20px}.dot{left:-48px}.branchtag{display:none}.card{padding:16px 18px}}
+@media (prefers-reduced-motion:reduce){.step{transition:none;opacity:1;transform:none}html{scroll-behavior:auto}}
+</style>
+</head>
+<body>
+<div id="bar"></div>
+<div id="tools">
+  <button class="btn" id="imp" title="기획 가지도에서 내보낸 JSON을 불러옵니다">JSON 불러오기</button>
+  <button class="btn" id="sample">예시</button>
+  <input type="file" id="file" accept="application/json" hidden>
+</div>
+
+<header class="hero">
+  <h1 id="hTitle">우리 기획은<br>이렇게 자랐다</h1>
+  <p id="hSub"></p>
+  <div class="down">↓ 스크롤해서 따라가 보세요</div>
+</header>
+<main id="main"><div id="spine"></div></main>
+<div id="lb"><img alt=""></div>
+
+<script>
+const STATUS={idea:{label:'아이디어',color:'#b08a2e'},active:{label:'진행중',color:'#3f7cac'},adopted:{label:'채택',color:'#3f8a56'},dropped:{label:'폐기',color:'#8a8578'}};
+const LANES=['#4f8a5b','#c0762f','#3f7cac','#a8507e','#7a6bb5','#a89530','#2f9a9a','#c4574a'];
+const $=id=>document.getElementById(id);
+let data=null,io=null;
+
+function sampleData(){let i=0;const t=Date.now();
+  const mk=(id,p,title,date,status,text)=>({id,parentId:p,title,date,status,text,images:[],createdAt:t+i++});
+  return {nodes:[
+    mk('a',null,'캠퍼스 생활 앱','2026-09-01','adopted','학생들이 캠퍼스에서 쓰는 앱을 만든다는 큰 방향에서 출발했다. 범위가 너무 넓어 구체화가 필요했다.'),
+    mk('b','a','중고거래 플랫폼','2026-09-08','dropped','이미 경쟁 서비스가 많아 차별점이 부족해서 접었다.'),
+    mk('c','a','스터디 매칭','2026-09-08','adopted','팀원 설문에서 "같이 공부할 사람 찾기" 수요가 가장 높았다.'),
+    mk('g','b','중고 전공책 교환 (축소안)','2026-09-15','dropped','전공책만 다루도록 범위를 좁혀 봤지만 사용 빈도가 낮을 것으로 판단했다.'),
+    mk('d','c','시간표 기반 자동 매칭','2026-09-20','active','공강 시간이 겹치는 사람끼리 자동으로 추천한다.'),
+    mk('e','c','관심 주제 태그 매칭','2026-09-20','idea','시간표 대신 주제 태그로 묶는 대안. 프로토타입으로 비교할 예정.'),
+    mk('f','d','AI 학습 요약 기능 추가','2026-10-05','idea','매칭된 스터디의 노트를 AI가 요약해 주는 확장 기능.')
+  ]}}
+
+function norm(d){return {nodes:d.nodes.map((n,i)=>({id:n.id||String(i),parentId:n.parentId||null,title:n.title||'(제목 없음)',date:n.date||'',status:STATUS[n.status]?n.status:'idea',text:n.text||'',images:Array.isArray(n.images)?n.images:[],createdAt:n.createdAt||i}))}}
+
+function build(){
+  const main=$('main');[...main.querySelectorAll('.step,.end')].forEach(e=>e.remove());
+  if(io)io.disconnect();
+  const nodes=[...data.nodes].sort((a,b)=>(a.date||'').localeCompare(b.date||'')||a.createdAt-b.createdAt);
+  const by={};nodes.forEach(n=>by[n.id]=n);
+  // lane colors: first child keeps parent's lane, others new lane
+  const kids={};nodes.forEach(n=>{(kids[n.parentId||'']=kids[n.parentId||'']||[]).push(n)});
+  const color={};let lane=-1;
+  const walk=(n,c)=>{color[n.id]=c;(kids[n.id]||[]).forEach((k,i)=>walk(k,i===0?c:LANES[(++lane)%LANES.length]))};
+  (kids['']||[]).forEach(r=>walk(r,LANES[(++lane)%LANES.length]));
+  nodes.forEach(n=>{if(!color[n.id])color[n.id]=LANES[0]});
+
+  const first=nodes[0],last=nodes[nodes.length-1];
+  $('hSub').textContent=nodes.length?`${nodes.length}개의 기획이 ${first.date||''} 부터 ${last.date||''} 까지 이어지고 갈라졌습니다. 방향이 어떻게 바뀌었는지 위에서 아래로 따라가 보세요.`:'표시할 기획이 없습니다. "JSON 불러오기"나 "예시"를 눌러 보세요.';
+
+  nodes.forEach((n,idx)=>{
+    const st=STATUS[n.status],el=document.createElement('section');
+    el.className='step'+(n.status==='dropped'?' dropped':'');el.style.cssText=`--c:${color[n.id]};--sc:${st.color}`;
+    const dot=document.createElement('span');dot.className='dot';el.append(dot);
+    const p=by[n.parentId],sib=p?(kids[p.id]||[]):[];
+    if(p&&sib.length>1&&sib[0]!==n){const bt=document.createElement('span');bt.className='branchtag';bt.textContent='새 가지';el.append(bt)}
+    const meta=document.createElement('div');meta.className='meta';
+    const no=document.createElement('span');no.textContent=String(idx+1).padStart(2,'0');
+    const ch=document.createElement('span');ch.className='chip';ch.textContent=st.label;
+    const dt=document.createElement('span');dt.textContent=n.date;
+    meta.append(no,ch,dt);
+    const h=document.createElement('h2');h.textContent=n.title;
+    const card=document.createElement('div');card.className='card';
+    const tx=document.createElement('p');tx.textContent=n.text;card.append(tx);
+    if(n.images.length){
+      const g=document.createElement('div');g.className='gal'+(n.images.length===1?' one':'');
+      n.images.forEach(src=>{const im=document.createElement('img');im.src=src;im.alt='';im.loading='lazy';im.onclick=()=>{$('lb').querySelector('img').src=src;$('lb').classList.add('open')};g.append(im)});
+      card.append(g);
+    }
+    const fr=document.createElement('div');fr.className='from';
+    if(p){fr.append('↳ ');const b=document.createElement('b');b.textContent=p.title;fr.append(b,'에서 이어짐'+(sib.length>1?' · 같은 기획에서 '+sib.length+'갈래로 나뉨':''))}
+    else fr.textContent='🌱 시작점';
+    card.append(fr);
+    el.append(meta,h,card);main.append(el);
+  });
+  const end=document.createElement('div');end.className='end';end.textContent=nodes.length?'— 현재까지의 기획 방향 —':'';main.append(end);
+
+  io=new IntersectionObserver(es=>es.forEach(e=>{if(e.isIntersecting)e.target.classList.add('in')}),{threshold:.15});
+  main.querySelectorAll('.step').forEach(s=>io.observe(s));
+  onScroll();
+}
+
+function onScroll(){
+  const h=document.documentElement,max=h.scrollHeight-innerHeight;
+  $('bar').style.width=(max>0?scrollY/max*100:0)+'%';
+  const main=$('main'),mt=main.getBoundingClientRect().top+scrollY;
+  const steps=[...main.querySelectorAll('.step')];
+  let act=null;const mid=scrollY+innerHeight*.5;
+  steps.forEach(s=>{const r=s.getBoundingClientRect();const top=r.top+scrollY;if(top<=mid)act=s});
+  steps.forEach(s=>s.classList.toggle('active',s===act));
+  const sp=$('spine');
+  if(act){const d=act.querySelector('.dot').getBoundingClientRect();sp.style.height=Math.max(0,d.top+scrollY+11-mt)+'px'}else sp.style.height='0';
+}
+addEventListener('scroll',onScroll,{passive:true});addEventListener('resize',onScroll);
+
+$('lb').onclick=()=>$('lb').classList.remove('open');
+addEventListener('keydown',e=>{if(e.key==='Escape')$('lb').classList.remove('open')});
+$('imp').onclick=()=>$('file').click();
+$('file').onchange=async e=>{
+  const f=e.target.files[0];e.target.value='';if(!f)return;
+  try{const d=JSON.parse(await f.text());if(!Array.isArray(d.nodes))throw 0;data=norm(d);build();scrollTo(0,0)}
+  catch(_){alert('기획 가지도에서 내보낸 JSON 파일이 아닙니다.')}
+};
+$('sample').onclick=()=>{data=norm(sampleData());build();scrollTo(0,0)};
+data=norm(sampleData());build();
+</script>
+</body>
+</html>
