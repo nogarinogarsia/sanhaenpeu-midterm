@@ -295,19 +295,31 @@
       Object.keys(pos).forEach(function (k) { maxX = Math.max(maxX, pos[k].l + pos[k].w); maxY = Math.max(maxY, pos[k].t + pos[k].h); });
       svg.setAttribute('width', maxX);
       svg.setAttribute('height', maxY);
+      // 가계도처럼 직선만 쓴다: 부모 아래로 수직선 → 가로 줄 → 각 자식으로 수직선
+      function line(d, on) {
+        var pa = document.createElementNS(NS, 'path');
+        pa.setAttribute('d', d);
+        pa.setAttribute('class', 'tedge ' + (on ? 'on' : 'off'));
+        svg.appendChild(pa);
+      }
       path.forEach(function (par, L) {
         var kids = levels[L + 1];
         if (!kids) return;
         var p = pos[par.id];
-        kids.forEach(function (k) {
-          var c = pos[k.id];
-          var x1 = p.l + p.w / 2, y1 = p.t + p.h, x2 = c.l + c.w / 2, y2 = c.t, d = (y2 - y1) * 0.5;
-          var adopted = onPath[k.id];
-          var pa = document.createElementNS(NS, 'path');
-          pa.setAttribute('d', 'M' + x1 + ',' + y1 + ' C' + x1 + ',' + (y1 + d) + ' ' + x2 + ',' + (y2 - d) + ' ' + x2 + ',' + y2);
-          pa.setAttribute('class', 'tedge ' + (adopted ? 'on' : 'off'));
-          svg.appendChild(pa);
-          if (adopted) edges[L] = { mid: { x: (x1 + x2) / 2, y: (y1 + y2) / 2 } };
+        var x1 = p.l + p.w / 2, y1 = p.t + p.h;
+        var childTop = Math.min.apply(null, kids.map(function (k) { return pos[k.id].t; }));
+        var busY = y1 + (childTop - y1) / 2;
+        var hasAdopted = kids.some(function (k) { return onPath[k.id]; });
+        // 채택되지 않은 줄을 먼저 그려서, 채택된 검은 선이 위에 오게 한다
+        kids.filter(function (k) { return !onPath[k.id]; }).forEach(function (k) {
+          var c = pos[k.id], x2 = c.l + c.w / 2;
+          line('M' + x1 + ',' + busY + ' H' + x2 + ' V' + c.t, false);
+        });
+        line('M' + x1 + ',' + y1 + ' V' + busY, hasAdopted);
+        kids.filter(function (k) { return onPath[k.id]; }).forEach(function (k) {
+          var c = pos[k.id], x2 = c.l + c.w / 2;
+          line('M' + x1 + ',' + busY + ' H' + x2 + ' V' + c.t, true);
+          edges[L] = { x1: x1, x2: x2, busY: busY };
         });
       });
     }
@@ -359,10 +371,20 @@
       var t = ease(clamp((u - j - 0.2) / 0.6));
       var A = poses[j], B = poses[j + 1], cx, cy;
       if (A.kind === 'fork' && B.kind === 'node' && edges[A.i]) {
-        // 간선의 중간을 지나도록 휘어서 이동 = 간선을 따라가는 카메라
-        var m = edges[A.i].mid, q = 1 - t;
-        cx = q * q * A.cx + 2 * q * t * m.x + t * t * B.cx;
-        cy = q * q * A.cy + 2 * q * t * m.y + t * t * B.cy;
+        // 직각 간선(아래로 → 옆으로 → 아래로)을 따라가는 카메라
+        var ed = edges[A.i];
+        var pts = [[A.cx, A.cy], [ed.x1, ed.busY], [ed.x2, ed.busY], [B.cx, B.cy]];
+        var lens = [], total = 0;
+        for (var n = 0; n < 3; n++) {
+          var len = Math.abs(pts[n + 1][0] - pts[n][0]) + Math.abs(pts[n + 1][1] - pts[n][1]);
+          lens.push(len);
+          total += len;
+        }
+        var d = t * total, seg = 0;
+        while (seg < 2 && d > lens[seg]) { d -= lens[seg]; seg++; }
+        var r = lens[seg] ? d / lens[seg] : 1;
+        cx = pts[seg][0] + (pts[seg + 1][0] - pts[seg][0]) * r;
+        cy = pts[seg][1] + (pts[seg + 1][1] - pts[seg][1]) * r;
       } else {
         cx = A.cx + (B.cx - A.cx) * t;
         cy = A.cy + (B.cy - A.cy) * t;

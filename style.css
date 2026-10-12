@@ -294,7 +294,7 @@ body.is-export { background: var(--bg); }
 }
 .ex-world { position: absolute; left: 0; top: 0; transform-origin: 0 0; will-change: transform; }
 .ex-world svg { position: absolute; left: 0; top: 0; overflow: visible; pointer-events: none; }
-.tedge { fill: none; stroke-linecap: round; }
+.tedge { fill: none; stroke-linecap: square; stroke-linejoin: miter; }
 .tedge.on { stroke: var(--ink); stroke-width: 9; }
 .tedge.off { stroke: var(--faint); stroke-width: 4; opacity: .75; }
 
