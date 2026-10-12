@@ -503,12 +503,50 @@
       try { ok = document.execCommand('copy'); } catch (e) { ok = false; }
       copyMsg.textContent = ok ? '복사했습니다.' : '복사하지 못했습니다. 직접 선택해 복사해 주세요.';
     });
+    // export 공유링크 (클라이언트용, 만든 시점 내용으로 고정)
+    var exBtn = el('button', { type: 'button', class: 'btn', text: 'export 공유링크 만들기' });
+    var exInput = el('input', { type: 'text', readonly: 'readonly', 'aria-label': 'export 공유링크' });
+    var exCopy = el('button', { type: 'button', class: 'btn', text: '복사' });
+    var exOpen = el('a', { class: 'btn', target: '_blank', rel: 'noopener', text: '미리보기' });
+    var exMsg = el('span', { class: 'copy-msg', role: 'status' });
+    var exOut = el('div', { class: 'link-row' }, [exInput, exCopy, exOpen]);
+    exOut.hidden = true;
+    exBtn.addEventListener('click', function () {
+      exBtn.disabled = true;
+      exMsg.textContent = '링크를 만드는 중...';
+      exOut.hidden = true;
+      window.Export.makeLink(p).then(function (res) {
+        exInput.value = res.url;
+        exOpen.href = res.url;
+        exOut.hidden = false;
+        exMsg.textContent = new Date(res.at).toLocaleString('ko-KR') + ' 기준으로 고정됨 · 링크 ' + res.length.toLocaleString('ko-KR') + '자' +
+          (res.long ? ' (길어서 일부 메신저에서 잘릴 수 있어요)' : '');
+        updateBottom();
+      }, function () {
+        exMsg.textContent = '링크가 너무 길어서 만들 수 없어요. 노드 내용을 줄여 주세요.';
+        updateBottom();
+      }).then(function () { exBtn.disabled = false; });
+    });
+    exCopy.addEventListener('click', function () {
+      exInput.select();
+      var ok = false;
+      try { ok = document.execCommand('copy'); } catch (e) { ok = false; }
+      exMsg.textContent = ok ? '복사했습니다.' : '복사하지 못했습니다. 직접 선택해 복사해 주세요.';
+    });
+
     r.bar = el('footer', { class: 'bottombar' }, [
-      el('span', { class: 'share-title', text: 'share 공유링크 · 팀원 편집용' }),
-      el('div', { class: 'link-row' }, [linkInput, copyBtn]),
-      copyMsg,
-      el('span', { class: 'notice-inline', text: '준비 중: 이 주소에는 프로젝트 내용이 담겨 있지 않아 다른 기기에서는 열리지 않고, 최신 내용 갱신도 아직 없어요.' }),
-      el('span', { class: 'zoomhint', text: '드래그: 이동 · 휠: 확대/축소 · 카드 클릭: 편집 · 카드의 +: 가지 치기 · 이름을 눌러 수정' })
+      el('div', { class: 'bar-row' }, [
+        el('span', { class: 'share-title', text: 'share 공유링크 · 팀원 편집용' }),
+        el('div', { class: 'link-row' }, [linkInput, copyBtn]),
+        copyMsg,
+        el('span', { class: 'notice-inline', text: '준비 중: 이 주소에는 프로젝트 내용이 담겨 있지 않아 다른 기기에서는 열리지 않고, 최신 내용 갱신도 아직 없어요.' })
+      ]),
+      el('div', { class: 'bar-row' }, [
+        el('span', { class: 'share-title', text: 'export 공유링크 · 클라이언트용' }),
+        exBtn, exOut, exMsg,
+        el('span', { class: 'notice-inline', text: '누르는 시점의 내용으로 고정돼요. 이미지와 내부용 메모, 채택되지 않은 가지의 하위 가지는 담기지 않아요. 고친 내용은 새 링크로 만드세요.' }),
+        el('span', { class: 'zoomhint', text: '드래그: 이동 · 휠: 확대/축소 · 카드 클릭: 편집 · +: 가지 치기' })
+      ])
     ]);
 
     r.lightbox = el('div', { class: 'lightbox' }, [el('img', { alt: '' })]);

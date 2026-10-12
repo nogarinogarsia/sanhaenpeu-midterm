@@ -53,6 +53,8 @@
 
   function clear() {
     if (window.Branch) window.Branch.unmount();
+    if (window.Export) window.Export.unmount();
+    document.title = '기획 변화 기록';
     document.body.classList.remove('is-main');
     app.textContent = '';
   }
@@ -324,9 +326,17 @@
     ]));
   }
 
+  /* ---------- export 결과물 화면 (링크 안의 데이터로만 그린다) ---------- */
+  function renderExport(payload) {
+    clear();
+    app.className = 'export-root';
+    window.Export.show(app, payload);
+  }
+
   /* ---------- 라우터 ---------- */
   function route() {
     var h = location.hash || '';
+    if (h.indexOf('#/export/') === 0) return renderExport(h.slice('#/export/'.length));
     if (h.indexOf('#/share/') === 0) return renderSharePlaceholder();
     if (current) {
       if (h !== '#/main') { location.hash = '#/main'; return; }
