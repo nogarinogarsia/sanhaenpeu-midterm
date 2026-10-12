@@ -283,17 +283,51 @@ textarea.in { min-height: 130px; resize: vertical; line-height: 1.55; }
 .notice-inline { flex: 1 1 260px; }
 .zoomhint { margin-left: auto; }
 
-/* ---------- export 결과물 화면: 세로 가지 + 스크롤 줌인 ---------- */
+/* ---------- export 결과물 화면: 아래로 뻗는 가계도 + 스크롤하면 간선을 따라 움직이는 카메라 ---------- */
 body.is-export { background: var(--bg); }
 .ex-progress { position: fixed; top: 0; left: 0; right: 0; height: 3px; z-index: 30; }
 .ex-progress i { display: block; height: 100%; width: 0; background: var(--ink); }
-.ex-track { position: relative; height: calc(var(--n) * 100vh); }
-.ex-stage { position: sticky; top: 0; height: 100vh; overflow: hidden; }
-.scene {
-  position: absolute; inset: 0; display: flex; align-items: center; justify-content: center;
-  padding: 0 20px; will-change: opacity, transform;
+.ex-track { position: relative; height: calc((var(--m) - 1) * 90vh + 100vh); }
+.ex-stage {
+  position: sticky; top: 0; height: 100vh; overflow: hidden;
+  background-image: radial-gradient(var(--dot) 1.2px, transparent 1.2px); background-size: 26px 26px;
 }
-.scene-in { width: 100%; max-width: 760px; max-height: 100%; overflow: auto; padding: 8vh 4px; }
+.ex-world { position: absolute; left: 0; top: 0; transform-origin: 0 0; will-change: transform; }
+.ex-world svg { position: absolute; left: 0; top: 0; overflow: visible; pointer-events: none; }
+.tedge { fill: none; stroke-linecap: round; }
+.tedge.on { stroke: var(--ink); stroke-width: 9; }
+.tedge.off { stroke: var(--faint); stroke-width: 4; opacity: .75; }
+
+.tnode {
+  position: absolute; width: 320px; padding: 18px 20px;
+  background: var(--card); border: 1px solid var(--line); border-radius: 14px; box-shadow: var(--shadow);
+}
+.tnode.path { border-left: 8px solid var(--ink); }
+.tlabel { margin: 0 0 6px; font-size: 13px; font-weight: 600; color: var(--muted); }
+.tnode h3 { margin: 6px 0; font-size: 26px; line-height: 1.25; letter-spacing: -.01em; overflow-wrap: anywhere; word-break: keep-all; }
+.tbody { margin: 0; white-space: pre-wrap; font-size: 16px; line-height: 1.65; overflow-wrap: anywhere; }
+.tbody.empty { color: var(--muted); }
+/* 채택되지 않은 가지: 글자를 옅은 회색으로 덜 읽히게 (취소선 없음) */
+.tnode.faded .ex-meta, .tnode.faded h3, .tnode.faded .tbody { color: var(--faint); }
+.tnode.faded .tbody { display: -webkit-box; -webkit-line-clamp: 4; -webkit-box-orient: vertical; overflow: hidden; }
+.tnode.faded .chip { border-color: var(--faint); color: var(--faint); background: transparent; text-decoration: none; }
+
+.ex-title-overlay {
+  position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; padding: 0 20px;
+  pointer-events: none; background: color-mix(in srgb, var(--bg) 84%, transparent);
+}
+.ex-title-inner { width: 100%; max-width: 1000px; }
+.ex-end {
+  position: absolute; left: 16px; right: 16px; bottom: 5vh; text-align: center; pointer-events: none; opacity: 0;
+}
+.ex-end span {
+  display: inline-block; max-width: 640px; padding: 8px 18px; border-radius: 99px;
+  background: var(--card); border: 1px solid var(--ink); font-size: 14px;
+}
+
+/* 아래는 모션 줄이기(문서형) 화면에서 쓰는 장면 스타일 */
+.scene { display: flex; align-items: center; justify-content: center; padding: 0 20px; }
+.scene-in { width: 100%; max-width: 760px; padding: 8vh 4px; }
 .scene-title .scene-in { max-width: 1000px; }
 
 .ex-team { margin: 0 0 8px; color: var(--muted); font-size: 18px; overflow-wrap: anywhere; }

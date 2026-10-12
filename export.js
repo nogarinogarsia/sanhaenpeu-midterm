@@ -2,7 +2,8 @@
  * export 공유링크: 만들기(buildPayload/makeLink) + 결과물 화면(show).
  * - 링크는 주소의 # 뒤에 "화면에 보이는 공개 내용"만 압축해서 담는다(서버 없음, 만든 시점 내용으로 고정).
  * - 내부용 내용, 이미지, 보이지 않는 하위 가지는 담지 않는다.
- * - 결과물 화면: 제목 → 시작 노드 → 갈라진 가지들 → 채택된 가지로 줌인 → 반복 (스크롤 연출).
+ * - 결과물 화면: 아래로 뻗는 가계도 하나를 그리고, 스크롤하면 카메라가 전체 → 시작 노드 →
+ *   갈라진 가지들 → 간선을 따라 채택된 노드(줌인) → … 순서로 움직인다. 모션 줄이기에서는 문서형으로 보여준다.
  */
 (function () {
   'use strict';
@@ -203,75 +204,177 @@
     document.body.classList.remove('is-export');
   }
 
-  function render(container, data) {
-    container.textContent = '';
-    document.body.classList.add('is-export');
-    document.title = data.title + ' · 기획 변화 기록';
+  var END_TEXT = {
+    leaf: '— 현재 기준의 방향 —',
+    multi: '여러 갈래가 함께 채택되어, 여기까지를 현재 기준으로 보여드려요.',
+    none: '아직 채택된 방향이 없어요. 현재까지 갈라진 가지예요.'
+  };
 
-    var w = walk(data.nodes);
+  function ease(t) { return t * t * (3 - 2 * t); }
+  function clamp(v) { return Math.max(0, Math.min(1, v)); }
+
+  /* 모션 줄이기: 카메라 없이 위에서 아래로 읽는 문서 */
+  function renderStatic(container, data, w) {
     var scenes = [titleScene(data)];
     w.steps.forEach(function (s, i) {
       var last = i === w.steps.length - 1;
       scenes.push(s.type === 'node' ? nodeScene(s, last) : forkScene(s, last ? w.end : null));
     });
-    // 채택된 가지가 앞 장면의 카드에서 줌인되도록 연결
-    scenes.forEach(function (s, i) {
-      if (i > 1 && s.kind === 'node' && scenes[i - 1].kind === 'fork') { s.zoomFrom = i - 1; scenes[i - 1].zoomTo = s.id; }
+    container.appendChild(el('div', { class: 'ex static' }, scenes.map(function (s) { return s.el; })));
+  }
+
+  /*
+   * 가계도 하나를 아래로 그리고, 스크롤에 따라 카메라가 움직인다.
+   * 카메라 자세(pose): 전체 → 시작 노드 → (갈라진 가지 전체) → 간선을 따라 채택된 노드 → … 반복
+   */
+  function renderTree(container, data, w) {
+    var path = [], levels = [];
+    w.steps.forEach(function (s) {
+      if (s.type === 'node') path.push(s.node); else levels.push(s.kids);
     });
+    levels.unshift([path[0]]);   // levels[0] = 시작 노드, levels[i+1] = path[i]에서 갈라진 가지들
+    var onPath = {};
+    path.forEach(function (n) { onPath[n.id] = true; });
 
-    var stage = el('div', { class: 'ex-stage' }, scenes.map(function (s) { return s.el; }));
+    var els = {};
+    function makeNode(n) {
+      var isPath = !!onPath[n.id];
+      var kids = [];
+      if (isPath) {
+        var d = path.indexOf(n);
+        kids.push(el('p', { class: 'tlabel', text: pad(d + 1) + ' · ' + (d === 0 ? '시작 노드' : '채택된 방향') }));
+      }
+      kids.push(el('div', { class: 'ex-meta' }, [chip(n.status), el('span', { text: n.date })]));
+      kids.push(el('h3', { text: n.title || '(제목 없음)' }));
+      kids.push(el('p', { class: n.text ? 'tbody' : 'tbody empty', text: n.text || '작성된 내용이 없어요.' }));
+      var e = el('div', { class: 'tnode ' + (isPath ? 'path' : 'faded') }, kids);
+      els[n.id] = e;
+      return e;
+    }
+
+    var NS = 'http://www.w3.org/2000/svg';
+    var svg = document.createElementNS(NS, 'svg');
+    var world = el('div', { class: 'ex-world' }, [svg]);
+    levels.forEach(function (row) { row.forEach(function (n) { world.appendChild(makeNode(n)); }); });
+
     var bar = el('i');
+    var overlay = el('div', { class: 'ex-title-overlay' }, [el('div', { class: 'ex-title-inner' }, [
+      el('p', { class: 'ex-team', text: data.team }),
+      el('h1', { class: 'ex-title', text: data.title }),
+      el('p', { class: 'ex-sub', text: '기획이 어떻게 이어지고 갈라졌는지 따라가 보세요.' + (data.date ? ' (' + data.date + ' 기준)' : '') }),
+      el('div', { class: 'down', 'aria-hidden': 'true', text: '↓ 스크롤해서 따라가 보세요' })
+    ])]);
+    var endNote = el('div', { class: 'ex-end', role: 'status' }, [el('span', { text: END_TEXT[w.end] })]);
+    var stage = el('div', { class: 'ex-stage' }, [world, overlay, endNote]);
     var track = el('div', { class: 'ex-track' }, [stage]);
-    track.style.setProperty('--n', scenes.length);
-    var root = el('div', { class: 'ex' }, [el('div', { class: 'ex-progress' }, [bar]), track]);
-    container.appendChild(root);
+    container.appendChild(el('div', { class: 'ex' }, [el('div', { class: 'ex-progress' }, [bar]), track]));
 
-    var reduce = window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
-    if (reduce) { root.classList.add('static'); return; }
+    var pos = {}, edges = [], poses = [];
 
-    // 줌인 기준점: 채택된 카드의 중심
-    function measure() {
-      scenes.forEach(function (s) {
-        if (!s.zoomTo) return;
-        var prev = s.el.style.transform;
-        s.el.style.transform = 'none';
-        var card = s.el.querySelector('li[data-id="' + s.zoomTo + '"] .kid-card');
-        if (card) {
-          var a = card.getBoundingClientRect(), b = s.el.getBoundingClientRect();
-          s.origin = (a.left + a.width / 2 - b.left) + 'px ' + (a.top + a.height / 2 - b.top) + 'px';
-        } else s.origin = '50% 50%';
-        s.el.style.transform = prev;
+    // 카드 실제 높이를 재서 줄별로 배치한다 (아래로 뻗는 가계도)
+    function layoutTree() {
+      var CW = 320, HG = 48, VG = 190, y = 0, cx = 0;
+      pos = {};
+      levels.forEach(function (row, L) {
+        var width = row.length * CW + (row.length - 1) * HG, start = cx - width / 2, rowH = 0;
+        row.forEach(function (n, k) {
+          var e = els[n.id], left = start + k * (CW + HG), h = e.offsetHeight;
+          e.style.left = left + 'px';
+          e.style.top = y + 'px';
+          pos[n.id] = { l: left, t: y, w: CW, h: h };
+          rowH = Math.max(rowH, h);
+        });
+        if (path[L]) cx = pos[path[L].id].l + CW / 2;
+        y += rowH + VG;
+      });
+
+      // 간선
+      svg.textContent = '';
+      edges = [];
+      var maxX = 0, maxY = 0;
+      Object.keys(pos).forEach(function (k) { maxX = Math.max(maxX, pos[k].l + pos[k].w); maxY = Math.max(maxY, pos[k].t + pos[k].h); });
+      svg.setAttribute('width', maxX);
+      svg.setAttribute('height', maxY);
+      path.forEach(function (par, L) {
+        var kids = levels[L + 1];
+        if (!kids) return;
+        var p = pos[par.id];
+        kids.forEach(function (k) {
+          var c = pos[k.id];
+          var x1 = p.l + p.w / 2, y1 = p.t + p.h, x2 = c.l + c.w / 2, y2 = c.t, d = (y2 - y1) * 0.5;
+          var adopted = onPath[k.id];
+          var pa = document.createElementNS(NS, 'path');
+          pa.setAttribute('d', 'M' + x1 + ',' + y1 + ' C' + x1 + ',' + (y1 + d) + ' ' + x2 + ',' + (y2 - d) + ' ' + x2 + ',' + y2);
+          pa.setAttribute('class', 'tedge ' + (adopted ? 'on' : 'off'));
+          svg.appendChild(pa);
+          if (adopted) edges[L] = { mid: { x: (x1 + x2) / 2, y: (y1 + y2) / 2 } };
+        });
       });
     }
 
-    function ease(t) { return t * t * (3 - 2 * t); }
-    function clamp(v) { return Math.max(0, Math.min(1, v)); }
+    function fitBox(minx, miny, maxx, maxy, padding, cap, vw, vh) {
+      var bw = maxx - minx + padding * 2, bh = maxy - miny + padding * 2;
+      return { cx: (minx + maxx) / 2, cy: (miny + maxy) / 2, s: Math.min(vw / bw, vh / bh, cap) };
+    }
+
+    function computePoses() {
+      var vw = stage.clientWidth, vh = stage.clientHeight;
+      poses = [];
+      var ids = Object.keys(pos);
+      var a = fitBox(
+        Math.min.apply(null, ids.map(function (k) { return pos[k].l; })),
+        Math.min.apply(null, ids.map(function (k) { return pos[k].t; })),
+        Math.max.apply(null, ids.map(function (k) { return pos[k].l + pos[k].w; })),
+        Math.max.apply(null, ids.map(function (k) { return pos[k].t + pos[k].h; })),
+        60, 1, vw, vh);
+      a.kind = 'title';
+      poses.push(a);
+      path.forEach(function (n, i) {
+        var p = pos[n.id];
+        poses.push({ kind: 'node', i: i, cx: p.l + p.w / 2, cy: p.t + p.h / 2, s: Math.min(vw * 0.84 / p.w, vh * 0.8 / p.h, 1.5) });
+        var kids = levels[i + 1];
+        if (kids) {
+          var minx = p.l, maxx = p.l + p.w, miny = p.t, maxy = p.t + p.h;
+          kids.forEach(function (k) {
+            var c = pos[k.id];
+            minx = Math.min(minx, c.l); maxx = Math.max(maxx, c.l + c.w); maxy = Math.max(maxy, c.t + c.h);
+          });
+          if (i === path.length - 1) maxy += 80;   // 마지막 장면은 안내 문구가 들어갈 자리를 남긴다
+          var f = fitBox(minx, miny, maxx, maxy, 50, 1.2, vw, vh);
+          f.kind = 'fork';
+          f.i = i;
+          poses.push(f);
+        }
+      });
+      track.style.setProperty('--m', poses.length);
+    }
 
     function update() {
       var rect = track.getBoundingClientRect();
       var range = track.offsetHeight - window.innerHeight;
       var prog = range > 0 ? clamp(-rect.top / range) : 0;
       bar.style.width = (prog * 100) + '%';
-      var N = scenes.length, u = prog * (N - 1);
-      var i = Math.min(N - 2, Math.floor(u));
-      var t = ease(clamp((u - i - 0.3) / 0.4));
-      scenes.forEach(function (s, k) {
-        var st = s.el.style, show = k === i || k === i + 1;
-        s.el.setAttribute('aria-hidden', show && (k === i ? t < 0.5 : t >= 0.5) ? 'false' : 'true');
-        if (!show) { st.opacity = 0; st.visibility = 'hidden'; st.transform = 'none'; st.pointerEvents = 'none'; return; }
-        st.visibility = 'visible';
-        st.pointerEvents = 'auto';
-        if (k === i) {
-          st.opacity = 1 - t;
-          if (s.zoomTo) { st.transformOrigin = s.origin || '50% 50%'; st.transform = 'scale(' + (1 + t * 1.8) + ')'; }
-          else { st.transformOrigin = '50% 50%'; st.transform = 'translateY(' + (-t * 40) + 'px)'; }
-        } else {
-          st.opacity = t;
-          if (s.zoomFrom) { st.transformOrigin = '50% 50%'; st.transform = 'scale(' + (0.6 + 0.4 * t) + ')'; }
-          else { st.transformOrigin = '50% 50%'; st.transform = 'translateY(' + ((1 - t) * 40) + 'px)'; }
-        }
-      });
+      var M = poses.length, u = prog * (M - 1);
+      var j = Math.min(M - 2, Math.max(0, Math.floor(u)));
+      var t = ease(clamp((u - j - 0.2) / 0.6));
+      var A = poses[j], B = poses[j + 1], cx, cy;
+      if (A.kind === 'fork' && B.kind === 'node' && edges[A.i]) {
+        // 간선의 중간을 지나도록 휘어서 이동 = 간선을 따라가는 카메라
+        var m = edges[A.i].mid, q = 1 - t;
+        cx = q * q * A.cx + 2 * q * t * m.x + t * t * B.cx;
+        cy = q * q * A.cy + 2 * q * t * m.y + t * t * B.cy;
+      } else {
+        cx = A.cx + (B.cx - A.cx) * t;
+        cy = A.cy + (B.cy - A.cy) * t;
+      }
+      var s = Math.exp(Math.log(A.s) + (Math.log(B.s) - Math.log(A.s)) * t);
+      var vw = stage.clientWidth, vh = stage.clientHeight;
+      world.style.transform = 'translate(' + (vw / 2 - cx * s) + 'px,' + (vh / 2 - cy * s) + 'px) scale(' + s + ')';
+      overlay.style.opacity = j === 0 ? 1 - clamp(t * 1.6) : 0;
+      endNote.style.opacity = clamp((u - (M - 1 - 0.45)) / 0.25);
     }
+
+    function relayout() { layoutTree(); computePoses(); update(); }
 
     var queued = false;
     function onScroll() {
@@ -280,10 +383,19 @@
       requestAnimationFrame(function () { queued = false; update(); });
     }
     on(window, 'scroll', onScroll, { passive: true });
-    on(window, 'resize', function () { measure(); update(); });
+    on(window, 'resize', relayout);
     window.scrollTo(0, 0);
-    requestAnimationFrame(function () { measure(); update(); });
-    if (document.fonts && document.fonts.ready) document.fonts.ready.then(function () { measure(); update(); });
+    requestAnimationFrame(relayout);
+    if (document.fonts && document.fonts.ready) document.fonts.ready.then(relayout);
+  }
+
+  function render(container, data) {
+    container.textContent = '';
+    document.body.classList.add('is-export');
+    document.title = data.title + ' · 기획 변화 기록';
+    var w = walk(data.nodes);
+    var reduce = window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+    if (reduce) renderStatic(container, data, w); else renderTree(container, data, w);
   }
 
   function errorView(container, msg) {
