@@ -85,12 +85,15 @@ select:focus-visible, textarea:focus-visible, .node:focus-visible {
 }
 
 /* ---------- 시작 화면 ---------- */
+/* 시작 화면: 내용을 화면 한가운데에 둔다. 창이 낮아 내용이 넘치면 min-height가 늘어나 잘리지 않고 스크롤된다. */
 .hero {
-  min-height: 92vh;
+  min-height: 100vh;
   display: flex;
   flex-direction: column;
-  justify-content: flex-start;
-  padding: clamp(20px, 6vh, 64px) 0 48px;
+  align-items: center;
+  justify-content: center;
+  text-align: center;
+  padding: 24px 0;
 }
 .hero h1 {
   font-size: clamp(30px, 5.5vw, 56px);
@@ -100,12 +103,12 @@ select:focus-visible, textarea:focus-visible, .node:focus-visible {
   word-break: keep-all;
   overflow-wrap: anywhere;
 }
-.hero .lead { color: var(--muted); font-size: 18px; max-width: 34em; margin: 0; }
+.hero .lead { color: var(--muted); font-size: 18px; max-width: 34em; margin: 0 auto; }
 
 .down { margin-top: 20px; color: var(--muted); font-size: 14px; animation: bob 1.8s ease-in-out infinite; }
 @keyframes bob { 50% { transform: translateY(8px); } }
 
-.fields { max-width: 520px; margin-top: 14px; }
+.fields { width: 100%; max-width: 520px; margin: 14px auto 0; text-align: left; }
 .fields label { display: block; font-weight: 600; margin: 10px 0 4px; }
 .fields input[type="text"], .link-row input {
   width: 100%;
@@ -143,6 +146,7 @@ input::placeholder, textarea::placeholder { color: var(--muted); opacity: .8; }
   padding: 26px 30px;
   box-shadow: var(--shadow);
   max-width: 560px;
+  text-align: left;
 }
 
 /* ---------- 글자를 눌러 바로 수정 ---------- */
